@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 //
-//    (C) Copyright 1995 - 2014 OSR Open Systems Resources, Inc.
+//    (C) Copyright 1995 - 2020 OSR Open Systems Resources, Inc.
 //    All Rights Reserved
 //
 //    This sofware is supplied for instructional purposes only.
@@ -43,9 +43,9 @@
 //
 //
 ///////////////////////////////////////////////////////////////////////////////
+#pragma once
+
 // ReSharper disable CppInconsistentNaming
-#ifndef __CDFilter_H__
-#define __CDFilter_H__
 
 #include <wdm.h>
 #include <wdf.h>
@@ -60,18 +60,21 @@
 #pragma warning(disable: 26494)     // Variable is uninitialized
 
 
+//
+// Dummy IOCTL to illustrate how we can check for a particular IOCTL Control Code in our
+// EvtIoDeviceControl Event Processing Callback.
+//
 constexpr auto IOCTL_YOU_ARE_INTERESTED_IN = (ULONG)CTL_CODE(FILE_DEVICE_UNKNOWN, 2048, METHOD_BUFFERED, FILE_ANY_ACCESS);
 
 //
-// Our per device context
+// Our per Device context
 //
 typedef struct _GENFILTER_DEVICE_CONTEXT {  // NOLINT(cppcoreguidelines-pro-type-member-init)
     WDFDEVICE       WdfDevice;
 
-    WDFIOTARGET     LocalTarget;
-    WDFCOLLECTION   ProtectedDevices;
-    BOOLEAN         ProtectThisVolume;
-    WCHAR           DriverLetter[4] = {};
+    //
+    // Other interesting stuff would go here
+    //
 
 } GENFILTER_DEVICE_CONTEXT, *PGENFILTER_DEVICE_CONTEXT;
 
@@ -82,6 +85,10 @@ typedef struct _GENFILTER_DEVICE_CONTEXT {  // NOLINT(cppcoreguidelines-pro-type
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(GENFILTER_DEVICE_CONTEXT,
                                    GenFilterGetDeviceContext)
 
+
+//
+// Foreward and roll-type declarations
+//
 extern "C" DRIVER_INITIALIZE DriverEntry;
 
 EVT_WDF_DRIVER_DEVICE_ADD GenFilterEvtDeviceAdd;
@@ -95,6 +102,4 @@ VOID
 GenFilterSendAndForget(_In_ WDFREQUEST Request, _In_ PGENFILTER_DEVICE_CONTEXT DevContext);
 
 VOID
-GenFilterSendWithCompletion(_In_ WDFREQUEST Request, _In_ PGENFILTER_DEVICE_CONTEXT DevContext);
-
-#endif // #ifndef __CDFilter_H__
+GenFilterSendWithCallback(_In_ WDFREQUEST Request, _In_ PGENFILTER_DEVICE_CONTEXT DevContext);

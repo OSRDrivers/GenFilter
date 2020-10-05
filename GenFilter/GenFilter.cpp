@@ -2,7 +2,7 @@
 /// @file GenFilter.cpp
 ///
 //
-// Copyright 2007-2020 OSR Open Systems Resources, Inc.
+// Copyright 2004-2020 OSR Open Systems Resources, Inc.
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -122,7 +122,7 @@ done:
 //
 //  GenFilterEvtDeviceAdd
 //
-//    This routine is called by the framework when a device of
+//    This routine is called by the Framework when a device of
 //    the type we filter is found in the system.
 //
 //  INPUTS:
@@ -167,14 +167,17 @@ GenFilterEvtDeviceAdd(WDFDRIVER       Driver,
     UNREFERENCED_PARAMETER(Driver);
 
     //
-    // Indicate that we're creating a FILTER device.  This will cause
-    // the Framework to attach us correctly to the device stack and auto-forward
-    // any requests we don't explicitly handle.
+    // Indicate that we're creating a FILTER Device, as opposed to a FUNCTION Device.
+    //
+    // This will cause the Framework to attach us correctly to the device stack,
+    // auto-forward any requests we don't explicitly handle, and use the
+    // appropriate state machine for PnP/Power management among
+    // several other things.
     //
     WdfFdoInitSetFilter(DeviceInit);
 
     //
-    // Setup our device attributes specifying our context type
+    // Setup our device attributes specifying our per-Device context
     //
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&wdfObjectAttr,
                                             GENFILTER_DEVICE_CONTEXT);
@@ -192,29 +195,26 @@ GenFilterEvtDeviceAdd(WDFDRIVER       Driver,
     }
 
     //
-    // Get our filter context
+    // Save our WDFDEVICE handle in the Device context for convenience
     //
     devContext = GenFilterGetDeviceContext(wdfDevice);
-
-    //
-    // Save our WDFDEVICE handle for convenience
-    //
     devContext->WdfDevice = wdfDevice;
 
     //
-    // Create our default Queue -- This is how we receive Requests
+    // Create our default Queue -- This is how we receive Requests.
     //
     WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&ioQueueConfig,
                                            WdfIoQueueDispatchParallel);
 
     //
     // Specify callbacks for those Requests that we want this driver to "see."
+    //
     // Note that because this driver is a FILTER, if we do not specify a
     // callback for a particular Request type the Framework will automatically
     // forward all Requests that it receives of that type to our Local I/O
     // Target.  So, for example, if you're not interested in inspecting
     // READ Requests, you can just not specify an EvtIoRead callback and the
-    // Framework will "do the right thing."
+    // Framework will "do the right thing" and send it along.
     //
     ioQueueConfig.EvtIoRead          = GenFilterEvtRead;
     ioQueueConfig.EvtIoWrite         = GenFilterEvtWrite;
@@ -223,7 +223,7 @@ GenFilterEvtDeviceAdd(WDFDRIVER       Driver,
     //
     // Create the queue...
     //
-    status = WdfIoQueueCreate(wdfDevice,
+    status = WdfIoQueueCreate(devContext->WdfDevice,
                               &ioQueueConfig,
                               WDF_NO_OBJECT_ATTRIBUTES,
                               WDF_NO_HANDLE);
@@ -247,8 +247,8 @@ done:
 //
 //  GenFilterEvtDeviceControl
 //
-//    This routine is called by the framework when there is a
-//    device control request for us to process
+//    This routine is called by the Framework when there is a
+//    device control Request for us to process.
 //
 //  INPUTS:
 //
@@ -308,10 +308,13 @@ GenFilterEvtDeviceControl(WDFQUEUE   Queue,
                  Request);
 #endif
         //
-        // Do something useful
+        // Do something useful.
         //
 
-        GenFilterSendWithCompletion(Request,
+        //
+        // We want to see the results for this particular Request... so send it
+        // and request a callback for when the Request has been completed.
+        GenFilterSendWithCallback(Request,
                                     devContext);
 
         return;
@@ -326,7 +329,7 @@ GenFilterEvtDeviceControl(WDFQUEUE   Queue,
 //
 //  GenFilterEvtRead
 //
-//    This routine is called by the framework when there is a
+//    This routine is called by the Framework when there is a
 //    read Request for us to process
 //
 //  INPUTS:
@@ -378,8 +381,8 @@ GenFilterEvtRead(WDFQUEUE   Queue,
 //
 //  GenFilterEvtWrite
 //
-//    This routine is called by the framework when there is a
-//    read Request for us to process
+//    This routine is called by the Framework when there is a
+//    read Request for us to process.
 //
 //  INPUTS:
 //
@@ -468,6 +471,17 @@ GenFilterSendAndForget(WDFREQUEST                Request,
 
     WDF_REQUEST_SEND_OPTIONS sendOpts;
 
+    //
+    // We want to send this Request and not deal with it again.  Note two
+    // important things about send-and-forget:
+    //
+    // 1. Sending a Request with send-and-forget is the logical equivalent of
+    //    completing the Request for the sending driver.  If WdfRequestSend returns
+    //    TRUE, the Request is no longer owned by the sending driver.
+    //
+    // 2.  Send-and-forget is pretty much restricted to use only with the Local I/O Target.
+    //     That's how we use it here.
+    //
     WDF_REQUEST_SEND_OPTIONS_INIT(&sendOpts,
                                   WDF_REQUEST_SEND_OPTION_SEND_AND_FORGET);
 
@@ -476,7 +490,12 @@ GenFilterSendAndForget(WDFREQUEST                Request,
                         &sendOpts)) {
 
         //
-        // Oops! Something bad happened, complete the request
+        // Oops! The Framework was unable to give the Request to the specified
+        // I/O Target.  Note that getting back TRUE from WdfRequestSend does not
+        // imply that the I/O Target processed the Request with an ultimate status
+        // of STATUS_SUCCESS. Rather, WdfRequestSend returning TRUE simply means
+        // that the Framework was successful in delivering the Request to the
+        // I/O Target for processing by the driver for that Target.
         //
         status = WdfRequestGetStatus(Request);
 #if DBG
@@ -494,7 +513,12 @@ GenFilterSendAndForget(WDFREQUEST                Request,
 //  GenFilterCompletionCallback
 //
 //    This routine is called by the Framework when a Request
-//    has been completed by the I/O Target to which we sent it
+//    has been completed by the I/O Target to which we sent it.
+//
+//    In this example, we always just complete the Request.  However,
+//    alternatively, if we wanted to, we COULD choose to NOT complete the
+//    Request in certain cases and keep it active.  This would allow us to
+//    alter it, and/or send it to another I/O Target.
 //
 //  INPUTS:
 //
@@ -545,7 +569,7 @@ GenFilterCompletionCallback(WDFREQUEST                     Request,
     status = Params->IoStatus.Status;
 
     //
-    // Potentially do something here
+    // Potentially do something interesting here
     //
 
     WdfRequestComplete(Request,
@@ -554,10 +578,10 @@ GenFilterCompletionCallback(WDFREQUEST                     Request,
 
 ///////////////////////////////////////////////////////////////////////////////
 //
-//  GenFilterSendWithCompletion
+//  GenFilterSendWithCallback
 //
-//      Sends a Request to our local I/O Target, with a completion routine
-//      callback.
+//      Sends a Request to our local I/O Target with a completion routine
+//      callback so that the results of the operation can be examined.
 //
 //      If our attempt to send the Request fails, this routine completes the
 //      Request with an appropriate status.  In all cases, then, the caller
@@ -587,8 +611,8 @@ GenFilterCompletionCallback(WDFREQUEST                     Request,
 ///////////////////////////////////////////////////////////////////////////////
 _Use_decl_annotations_
 VOID
-GenFilterSendWithCompletion(WDFREQUEST                Request,
-                            PGENFILTER_DEVICE_CONTEXT DevContext)
+GenFilterSendWithCallback(WDFREQUEST                Request,
+                          PGENFILTER_DEVICE_CONTEXT DevContext)
 {
     NTSTATUS status;
 
@@ -623,4 +647,8 @@ GenFilterSendWithCompletion(WDFREQUEST                Request,
         WdfRequestComplete(Request,
                            status);
     }
+
+    //
+    // When we return the Request is always "gone"
+    //
 }
